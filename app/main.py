@@ -1,0 +1,245 @@
+#!/usr/bin/env python
+"""FastAPI entry point for the Voice Authentication service.
+
+Provides a minimal health‑check endpoint. Additional routes will be added later.
+"""
+
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import JSONResponse
+from pathlib import Path
+import shutil
+import numpy as np
+
+from app.embedding import generate_embedding
+from constants import DEFAULT_THRESHOLD
+
+from fastapi.middleware.cors import CORSMiddleware
+import vad_processor
+from app import customer_manager
+
+app = FastAPI(title="Voice Authentication API", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Ensure required directories exist
+TEMP_DIR = Path("temp")
+TEMP_DIR.mkdir(exist_ok=True)
+SPEAKER_DB_DIR = Path("database") / "speakers"
+SPEAKER_DB_DIR.mkdir(parents=True, exist_ok=True)
+
+@app.get("/", response_class=JSONResponse)
+async def root() -> dict:
+    """Root health‑check endpoint.
+
+    Returns a simple JSON payload confirming that the API is running.
+    """
+    return {"message": "Voice Authentication API Running"}
+
+@app.post("/enroll", response_class=JSONResponse)
+async def enroll(
+    name: str = Form(...),
+    audio: UploadFile = File(...)
+) -> dict:
+    """Enroll a new speaker.
+
+    Saves the uploaded audio temporarily, generates an embedding, stores it,
+    and cleans up the temporary file. Returns JSON with status and details.
+    """
+    temp_path = TEMP_DIR / audio.filename
+    try:
+        # Save uploaded file to temporary location
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+        # Generate embedding
+        embedding = generate_embedding(str(temp_path))
+        # Save embedding to database
+        save_path = SPEAKER_DB_DIR / f"{name}.npy"
+        np.save(save_path, embedding)
+        # Cleanup temporary file
+        temp_path.unlink(missing_ok=True)
+        return {
+            "status": "success",
+            "speaker": name,
+            "embedding_dimension": embedding.shape[0]
+        }
+    except Exception as exc:
+        import traceback
+        with open("error.log", "a") as f:
+            f.write(f"Error in /enroll: {exc}\\n{traceback.format_exc()}\\n")
+        # Ensure temp file is removed on error
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+# Verification endpoint
+@app.post("/verify", response_class=JSONResponse)
+async def verify(
+    name: str = Form(...),
+    audio: UploadFile = File(...)
+) -> dict:
+    """Verify a speaker by comparing an uploaded audio embedding against the enrolled embedding."""
+    # Save uploaded audio to temporary file
+    temp_path = TEMP_DIR / audio.filename
+    try:
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+        # Generate embedding from the uploaded audio
+        embedding = generate_embedding(str(temp_path))
+        # Load enrolled speaker embedding
+        enrolled_path = SPEAKER_DB_DIR / f"{name}.npy"
+        if not enrolled_path.is_file():
+            raise HTTPException(status_code=404, detail=f"Speaker '{name}' not found")
+        enrolled_emb = np.load(enrolled_path)
+        # Cosine similarity
+        norm_a = np.linalg.norm(embedding)
+        norm_b = np.linalg.norm(enrolled_emb)
+        similarity = float(np.dot(embedding, enrolled_emb) / (norm_a * norm_b)) if norm_a and norm_b else 0.0
+        threshold = DEFAULT_THRESHOLD
+        verified = similarity >= threshold
+        return {
+            "speaker": name,
+            "similarity": round(similarity * 100, 2),
+            "threshold": threshold * 100,
+            "verified": verified,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        temp_path.unlink(missing_ok=True)
+# Identification endpoint
+@app.post("/identify", response_class=JSONResponse)
+async def identify(
+    audio: UploadFile = File(...)
+) -> dict:
+    """Identify the most similar enrolled speaker."""
+    temp_path = TEMP_DIR / audio.filename
+    try:
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+        # Generate embedding from uploaded audio
+        embedding = generate_embedding(str(temp_path))
+        # Load all speaker embeddings
+        speaker_embeddings: dict[str, np.ndarray] = {}
+        for npy_path in SPEAKER_DB_DIR.glob("*.npy"):
+            speaker_name = npy_path.stem
+            speaker_embeddings[speaker_name] = np.load(npy_path)
+        if not speaker_embeddings:
+            raise HTTPException(status_code=404, detail="No enrolled speakers found")
+        # Compute similarities
+        best_name = "Unknown"
+        best_sim = 0.0
+        for name, emb in speaker_embeddings.items():
+            norm_a = np.linalg.norm(embedding)
+            norm_b = np.linalg.norm(emb)
+            sim = float(np.dot(embedding, emb) / (norm_a * norm_b)) if norm_a and norm_b else 0.0
+            if sim > best_sim:
+                best_sim = sim
+                best_name = name
+        threshold = DEFAULT_THRESHOLD
+        identified = best_sim >= threshold
+        result = {
+            "predicted_speaker": best_name if identified else "Unknown",
+            "similarity": round(best_sim * 100, 2),
+            "identified": identified,
+        }
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+# Authenticate endpoint (Orchestration)
+@app.post("/authenticate", response_class=JSONResponse)
+async def authenticate(
+    audio: UploadFile = File(...)
+) -> dict:
+    """Automatic Customer Voice Identity Service endpoint."""
+    temp_path = TEMP_DIR / audio.filename
+    try:
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+            
+        # 1. Voice Activity Detection (VAD)
+        waveform, sr = vad_processor.load_audio(temp_path)
+        speech_waveform = vad_processor.remove_silence(waveform, sr)
+        
+        duration_seconds = len(speech_waveform) / sr
+        if duration_seconds < 15.0:
+            return {
+                "status": "insufficient_audio",
+                "message": "Need at least 15 seconds of clear speech."
+            }
+            
+        # 2. Generate Embedding
+        # generate_embedding takes a path, so we use the original temp_path which contains the full audio. 
+        # (The VAD check was just to ensure length is sufficient).
+        embedding = generate_embedding(str(temp_path))
+        
+        # 3. Load every enrolled speaker embedding
+        speaker_embeddings: dict[str, np.ndarray] = {}
+        for npy_path in SPEAKER_DB_DIR.glob("*.npy"):
+            speaker_name = npy_path.stem
+            speaker_embeddings[speaker_name] = np.load(npy_path)
+            
+        # 4. Cosine Similarity Search
+        best_name = None
+        best_sim = 0.0
+        
+        if speaker_embeddings:
+            for name, emb in speaker_embeddings.items():
+                norm_a = np.linalg.norm(embedding)
+                norm_b = np.linalg.norm(emb)
+                sim = float(np.dot(embedding, emb) / (norm_a * norm_b)) if norm_a and norm_b else 0.0
+                if sim > best_sim:
+                    best_sim = sim
+                    best_name = name
+                    
+        threshold = DEFAULT_THRESHOLD
+        
+        # 5. Decision Matrix
+        if best_name and best_sim >= threshold:
+            # Existing Customer
+            customer = customer_manager.update_customer(best_name)
+            return {
+                "customer_id": best_name,
+                "existing_customer": True,
+                "similarity": round(best_sim * 100, 2),
+                "call_count": customer.get("call_count", 1),
+                "status": "existing_customer"
+            }
+        else:
+            # Unknown Speaker / New Customer
+            new_id = customer_manager.generate_customer_id()
+            save_path = SPEAKER_DB_DIR / f"{new_id}.npy"
+            np.save(save_path, embedding)
+            
+            customer = customer_manager.create_customer(new_id)
+            return {
+                "customer_id": new_id,
+                "existing_customer": False,
+                "similarity": round(best_sim * 100, 2) if best_name else 0.0,
+                "call_count": customer.get("call_count", 1),
+                "status": "new_customer"
+            }
+            
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

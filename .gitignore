@@ -1,0 +1,32 @@
+# Virtual Environment
+speaker_env/
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temporary files
+temp/
+temp_recording.wav
+
+# VS Code
+.vscode/
+
+# JetBrains
+.idea/
+
+# Environment
+.env
+
+# Generated voice database
+database/speakers/*.npy
+database/customers.json
+
+# OS
+.DS_Store
+Thumbs.db
+embedding.npy
