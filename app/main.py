@@ -183,52 +183,76 @@ async def authenticate(
     import time
     import traceback
 
-    print("========== START /authenticate ==========")
-    t_total_start = time.time()
+    print("========== START /authenticate ===========")
+    print("[DEBUG] Request received")
+    total_start = time.perf_counter()
     temp_path = TEMP_DIR / audio.filename
+
+    # ---------- 1️⃣ Save uploaded file ----------
     try:
-        # -------------------- 1️⃣ Save uploaded file --------------------
-        t_start = time.time()
+        start = time.perf_counter()
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
-        t_save = time.time()
-        print(f"[Timing] Saving uploaded file: {t_save - t_start:.4f}s")
+        elapsed = time.perf_counter() - start
+        print(f"[PERF] Saving uploaded file: {elapsed:.2f}s")
+    except Exception as exc:
+        print("[ERROR] Saving uploaded file")
+        traceback.print_exc()
+        raise
 
-        # -------------------- 2️⃣ Voice Activity Detection (VAD) --------------------
-        t_start = time.time()
+    # ---------- 2️⃣ Load audio (VAD) ----------
+    try:
+        start = time.perf_counter()
         waveform, sr = vad_processor.load_audio(temp_path)
-        t_load = time.time()
-        print(f"[Timing] load_audio(): {t_load - t_start:.4f}s")
+        elapsed = time.perf_counter() - start
+        print(f"[PERF] Load audio: {elapsed:.2f}s")
+    except Exception as exc:
+        print("[ERROR] Load audio")
+        traceback.print_exc()
+        raise
 
-        t_start = time.time()
+    # ---------- 3️⃣ Voice Activity Detection ----------
+    try:
+        start = time.perf_counter()
         speech_waveform = vad_processor.remove_silence(waveform, sr)
-        t_vad = time.time()
-        print(f"[Timing] remove_silence(): {t_vad - t_start:.4f}s")
+        elapsed = time.perf_counter() - start
+        print(f"[PERF] Voice activity detection: {elapsed:.2f}s")
+    except Exception as exc:
+        print("[ERROR] Voice activity detection")
+        traceback.print_exc()
+        raise
 
-        duration_seconds = len(speech_waveform) / sr
-        if duration_seconds < 15.0:
-            return {
-                "status": "insufficient_audio",
-                "message": "Need at least 15 seconds of clear speech."
-            }
+    duration_seconds = len(speech_waveform) / sr
+    if duration_seconds < 15.0:
+        total_elapsed = time.perf_counter() - total_start
+        print(f"[PERF] total endpoint execution: {total_elapsed:.2f}s")
+        return {
+            "status": "insufficient_audio",
+            "message": "Need at least 15 seconds of clear speech.",
+        }
 
-        # -------------------- Debug info for the processed waveform --------------------
-        print(f"type(speech_waveform): {type(speech_waveform)}")
-        print(f"speech_waveform.shape: {speech_waveform.shape}")
-        print(f"speech_waveform.dtype: {speech_waveform.dtype}")
-        print(f"sr: {sr}")
+    # Debug info for the processed waveform
+    print(f"type(speech_waveform): {type(speech_waveform)}")
+    print(f"speech_waveform.shape: {speech_waveform.shape}")
+    print(f"speech_waveform.dtype: {speech_waveform.dtype}")
+    print(f"sr: {sr}")
 
-        # -------------------- 3️⃣ Generate Embedding (reuse waveform) --------------------
-        t_start = time.time()
+    # ---------- 4️⃣ Generate embedding ----------
+    try:
+        start = time.perf_counter()
         embedding = generate_embedding_from_waveform(speech_waveform, sr)
-        t_embed = time.time()
-        print(f"[Timing] generate_embedding_from_waveform(): {t_embed - t_start:.4f}s")
+        elapsed = time.perf_counter() - start
+        print(f"[PERF] Embedding: {elapsed:.2f}s")
+    except Exception as exc:
+        print("[ERROR] Embedding generation")
+        traceback.print_exc()
+        raise
 
-        # -------------------- 4️⃣ Cosine similarity search --------------------
-        t_start = time.time()
+    # ---------- 5️⃣ Cosine similarity search ----------
+    try:
+        start = time.perf_counter()
         best_name = None
         best_sim = 0.0
-
         if speaker_embeddings_cache:
             for name, emb in speaker_embeddings_cache.items():
                 norm_a = np.linalg.norm(embedding)
@@ -241,13 +265,17 @@ async def authenticate(
                 if sim > best_sim:
                     best_sim = sim
                     best_name = name
-
         threshold = DEFAULT_THRESHOLD
-        t_sim = time.time()
-        print(f"[Timing] speaker similarity search: {t_sim - t_start:.4f}s")
+        elapsed = time.perf_counter() - start
+        print(f"[PERF] Cosine similarity search: {elapsed:.2f}s")
+    except Exception as exc:
+        print("[ERROR] Cosine similarity search")
+        traceback.print_exc()
+        raise
 
-        # -------------------- 5️⃣ Decision matrix (customer handling) --------------------
-        t_start = time.time()
+    # ---------- 6️⃣ Customer lookup / creation ----------
+    try:
+        start = time.perf_counter()
         if best_name and best_sim >= threshold:
             # Existing Customer
             customer = customer_manager.update_customer(best_name)
@@ -259,12 +287,11 @@ async def authenticate(
                 "status": "existing_customer",
             }
         else:
-            # Unknown Speaker / New Customer
+            # New Customer
             new_id = customer_manager.generate_customer_id()
             save_path = SPEAKER_DB_DIR / f"{new_id}.npy"
             np.save(save_path, embedding)
             speaker_embeddings_cache[new_id] = embedding
-
             customer = customer_manager.create_customer(new_id)
             response = {
                 "customer_id": new_id,
@@ -273,27 +300,25 @@ async def authenticate(
                 "call_count": customer.get("call_count", 1),
                 "status": "new_customer",
             }
-        t_cust = time.time()
-        print(f"[Timing] customer creation/update: {t_cust - t_start:.4f}s")
-
-        # -------------------- Return response --------------------
-        t_start = time.time()
-        t_resp = time.time()  # essentially instantaneous
-        print(f"[Timing] returning the response: {t_resp - t_start:.4f}s")
-        print(
-            f"========== END /authenticate (Total: {time.time() - t_total_start:.4f}s) =========="
-        )
-        return response
-
+        elapsed = time.perf_counter() - start
+        print(f"[PERF] Customer creation/update: {elapsed:.2f}s")
     except Exception as exc:
-        # Full traceback for Railway debugging
-        print("========== AUTHENTICATE ERROR ==========")
+        print("[ERROR] Customer handling")
         traceback.print_exc()
-        print("========================================")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise
 
-    finally:
-        # Clean up temporary file
-        temp_path.unlink(missing_ok=True)
+    # ---------- Return response ----------
+    try:
+        start = time.perf_counter()
+        # response already prepared
+        elapsed = time.perf_counter() - start
+        print(f"[PERF] Returning response: {elapsed:.2f}s")
+    except Exception as exc:
+        print("[ERROR] Returning response")
+        traceback.print_exc()
+        raise
 
-
+    total_elapsed = time.perf_counter() - total_start
+    print(f"========== END /authenticate (Total: {total_elapsed:.2f}s) ===========")
+    temp_path.unlink(missing_ok=True)
+    return response
