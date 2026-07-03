@@ -182,6 +182,8 @@ async def authenticate(audio: UploadFile = File(...)):
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(audio.file, buffer)
     print("STEP 2 - File Saved", flush=True)
+    waveform, sr = vad_processor.load_audio(temp_path)
+    print("STEP 3 - Audio Loaded", flush=True)
     return {
-        "status": "file_saved"
+        "status": "audio_loaded"
     }
