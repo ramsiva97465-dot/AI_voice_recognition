@@ -1,13 +1,16 @@
-﻿torch==2.1.2
+﻿fastapi==0.109.2
+uvicorn==0.27.0
+python-multipart==0.0.7
+
+torch==2.1.2
 torchaudio==2.1.2
+
 speechbrain==0.5.13
-huggingface_hub==0.20.3
 transformers==4.38.1
+huggingface_hub>=0.20.3,<1.0
 
 librosa==0.10.1
 soundfile==0.12.1
 numpy==1.26.4
 
-fastapi==0.109.2
-uvicorn==0.27.0
-python-multipart==0.0.7
+sentencepiece
