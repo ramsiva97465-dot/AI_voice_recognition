@@ -219,3 +219,29 @@ def delete_customer(db: Session, customer_id: uuid.UUID) -> bool:
     except Exception as e:
         db.rollback()
         raise e
+
+
+def get_all_customers(db: Session):
+    """
+    Retrieves all customers with their voice embedding counts.
+    
+    Args:
+        db (Session): Database session.
+        
+    Returns:
+        List[Tuple[Customer, int]]: List of tuples containing Customer object and their voice embedding count.
+    """
+    from sqlalchemy import func
+    try:
+        return db.query(
+            Customer,
+            func.count(VoiceEmbedding.embedding_id).label("embedding_count")
+        ).outerjoin(
+            VoiceEmbedding, Customer.customer_id == VoiceEmbedding.customer_id
+        ).group_by(
+            Customer.customer_id
+        ).all()
+    except Exception as e:
+        db.rollback()
+        raise e
+

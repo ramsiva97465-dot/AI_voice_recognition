@@ -11,9 +11,37 @@
 
 from __future__ import annotations
 
+import torchaudio
+if not hasattr(torchaudio, "set_audio_backend"):
+    torchaudio.set_audio_backend = lambda backend: None
+
 import pathlib
 import sys
+import shutil
 from typing import Optional
+
+def _safe_symlink_to(self, target, target_is_directory=False):
+    try:
+        self._orig_symlink_to(target, target_is_directory)
+    except OSError as e:
+        if getattr(e, "winerror", None) == 1314:
+            # Fallback to copy on Windows when symlink creation privilege is missing
+            target_path = pathlib.Path(target)
+            if not target_path.is_absolute():
+                # Resolve relative targets against the parent directory of self
+                target_path = (self.parent / target_path).resolve()
+            if target_path.is_dir():
+                shutil.copytree(target_path, self, dirs_exist_ok=True)
+            else:
+                # Ensure the destination folder exists
+                self.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target_path, self)
+        else:
+            raise
+
+if not hasattr(pathlib.Path, "_orig_symlink_to"):
+    pathlib.Path._orig_symlink_to = pathlib.Path.symlink_to
+    pathlib.Path.symlink_to = _safe_symlink_to
 
 import numpy as np
 import torch

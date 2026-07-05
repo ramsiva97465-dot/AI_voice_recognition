@@ -75,6 +75,40 @@ async def root() -> dict:
     """
     return {"message": "Voice Authentication API Running"}
 
+@app.get("/customers", response_class=JSONResponse)
+async def list_customers(db: Session = Depends(get_db)) -> dict:
+    """List all enrolled customers from the database.
+
+    Fetches each customer along with their total voice embedding count.
+    """
+    try:
+        results = crud.get_all_customers(db)
+        
+        customer_list = []
+        for customer, embedding_count in results:
+            customer_list.append({
+                "customer_id": str(customer.customer_id),
+                "customer_name": customer.customer_name,
+                "customer_reference": customer.customer_reference,
+                "mobile_number": customer.mobile_number,
+                "status": customer.status,
+                "embedding_count": embedding_count,
+                "created_at": customer.created_at.isoformat() if customer.created_at else None,
+                "updated_at": customer.updated_at.isoformat() if customer.updated_at else None
+            })
+            
+        return {
+            "status": "success",
+            "count": len(customer_list),
+            "customers": customer_list
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while fetching customers: {str(e)}"
+        )
+
+
 @app.post("/enroll", response_class=JSONResponse)
 async def enroll(
     name: str = Form(...),
