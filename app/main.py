@@ -309,9 +309,7 @@ async def authenticate(
             }
 
         # 3. Generate the embedding
-        embedding = generate_embedding_from_waveform(speech_waveform, sr)
-
-        # 4. Cosine similarity search
+        embedding = generate_embedding_from_waveform(speech_waveform, sr)        # 4. Cosine similarity search
         best_name = None
         best_customer_id = None
         best_sim = 0.0
@@ -335,28 +333,25 @@ async def authenticate(
         # Determine authentication result
         authenticated = best_customer_id is not None and best_sim >= threshold
         
-        # Save authentication log into PostgreSQL
-        if best_customer_id is not None:
+        processing_time_ms = (time.perf_counter() - total_start) * 1000.0
+        current_timestamp = datetime.utcnow().isoformat()
+
+        if authenticated:
+            # Save authentication log into PostgreSQL
             crud.save_authentication_log(
                 db=db,
                 customer_id=best_customer_id,
                 similarity=best_sim,
                 threshold=threshold,
-                authenticated=authenticated,
-                processing_time_ms=(time.perf_counter() - total_start) * 1000.0,
+                authenticated=True,
+                processing_time_ms=processing_time_ms,
                 audio_duration=duration_seconds
             )
             
             # Fetch matched customer to get matched_embedding_count
             matched_customer = crud.get_customer_by_id(db, best_customer_id)
             matched_embedding_count = len(matched_customer.voice_embeddings) if matched_customer else 0
-        else:
-            matched_embedding_count = 0
 
-        processing_time_ms = (time.perf_counter() - total_start) * 1000.0
-        current_timestamp = datetime.utcnow().isoformat()
-
-        if authenticated:
             return {
                 "status": "success",
                 "existing_customer": True,
@@ -373,18 +368,35 @@ async def authenticate(
                 "message": "Speaker authenticated successfully."
             }
         else:
+            # NO matching customer exists. Automatically create a new customer.
+            # Generate unique customer name sequentially
+            existing_customers = crud.get_all_customers(db)
+            next_num = len(existing_customers) + 1
+            new_customer_name = f"CUSTOMER_{next_num:06d}"
+            while crud.get_customer_by_name(db, new_customer_name) is not None:
+                next_num += 1
+                new_customer_name = f"CUSTOMER_{next_num:06d}"
+                
+            # Create Customer
+            new_customer = crud.create_customer(db, new_customer_name)
+            
+            # Save Voice Embedding
+            crud.save_embedding(
+                db=db,
+                customer_id=new_customer.customer_id,
+                embedding=embedding,
+                sample_rate=sr,
+                audio_duration=duration_seconds
+            )
+            
             return {
-                "status": "warning",
+                "status": "success",
                 "existing_customer": False,
-                "authentication_result": "UNKNOWN_SPEAKER",
-                "similarity": round(best_sim * 100, 2),
-                "threshold": threshold,
-                "processing_time_ms": round(processing_time_ms, 2),
-                "audio_duration": round(duration_seconds, 2),
-                "matched_embedding_count": matched_embedding_count,
-                "model": "ECAPA-TDNN",
-                "timestamp": current_timestamp,
-                "message": "Speaker not registered."
+                "new_customer_created": True,
+                "customer_id": str(new_customer.customer_id),
+                "customer_name": new_customer.customer_name,
+                "authentication_result": "NEW_CUSTOMER_CREATED",
+                "message": "New customer created successfully."
             }
 
     except Exception as exc:
