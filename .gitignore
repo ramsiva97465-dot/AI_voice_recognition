@@ -30,3 +30,7 @@ database/customers.json
 .DS_Store
 Thumbs.db
 embedding.npy
+
+# Large ML model files (downloaded at runtime, not stored in git)
+models/
+embeddings/
