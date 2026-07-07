@@ -1,17 +1,38 @@
+# ---------------------------------------------------------------
+# Multi-stage Dockerfile for Voice Authentication API
+# Base: python:3.11-slim + system audio/build deps
+# ---------------------------------------------------------------
+
 FROM python:3.11-slim
 
-# Set working directory
+# ----- System dependencies -----
+# libsndfile1   -> soundfile / librosa
+# ffmpeg        -> torchaudio audio I/O
+# libgomp1      -> PyTorch OpenMP
+# gcc / g++     -> build wheels for psycopg2, pgvector, etc.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    libgomp1 \
+    gcc \
+    g++ \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ----- Working directory -----
 WORKDIR /app
 
-# Copy requirements and install dependencies
+# ----- Install Python dependencies -----
+# Copy requirements first for Docker layer caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire project into the image
+# Upgrade pip, then install all deps
+RUN pip install --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
+
+# ----- Copy project files -----
 COPY . .
 
-# Expose the port FastAPI runs on
+# ----- Runtime -----
 EXPOSE 8000
-
-# Command to run the FastAPI app
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

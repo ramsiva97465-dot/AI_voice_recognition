@@ -1,10 +1,40 @@
-speaker_env/
+# Python cache
 __pycache__/
 *.pyc
-.git
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual envs
+speaker_env/
+venv/
+.venv/
+env/
+
+# Git
+.git/
 .gitignore
+
+# IDE
 .vscode/
 .idea/
+
+# Temp / local artifacts
 temp/
 temp_recording.wav
 embedding.npy
+embeddings/
+audio/
+
+# Local env file (Railway injects env vars separately)
+.env
+
+# Large local model cache (models are downloaded at runtime)
+models/
+
+# Docs/notebooks
+README.md
+*.ipynb
