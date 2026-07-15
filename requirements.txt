@@ -8,8 +8,8 @@ python-multipart==0.0.7
 # =========================
 # Machine Learning
 # =========================
-torch>=2.2.0
-torchaudio>=2.2.0
+# torch and torchaudio are installed via Dockerfile with CPU-only wheels
+# to avoid downloading the large CUDA version during Railway builds
 
 # =========================
 # SpeechBrain

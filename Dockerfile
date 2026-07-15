@@ -1,15 +1,10 @@
 # ---------------------------------------------------------------
-# Multi-stage Dockerfile for Voice Authentication API
-# Base: python:3.11-slim + system audio/build deps
+# Dockerfile for Voice Authentication API - Railway Optimized
 # ---------------------------------------------------------------
 
 FROM python:3.11-slim
 
 # ----- System dependencies -----
-# libsndfile1   -> soundfile / librosa
-# ffmpeg        -> torchaudio audio I/O
-# libgomp1      -> PyTorch OpenMP
-# gcc / g++     -> build wheels for psycopg2, pgvector, etc.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
@@ -23,16 +18,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # ----- Install Python dependencies -----
-# Copy requirements first for Docker layer caching
 COPY requirements.txt .
 
 # Upgrade pip
 RUN pip install --upgrade pip
 
-# Install CPU-only PyTorch and Torchaudio first to save 2GB+ space and speed up Railway builds
-RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Step 1: Install CPU-only PyTorch first (pinned versions = faster pip resolve)
+RUN pip install --no-cache-dir \
+    torch==2.2.2+cpu \
+    torchaudio==2.2.2+cpu \
+    --index-url https://download.pytorch.org/whl/cpu
 
-# Install the remaining requirements
+# Step 2: Install remaining packages (torch already satisfied, won't re-download)
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ----- Copy project files -----
@@ -41,5 +38,3 @@ COPY . .
 # ----- Runtime -----
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-# Trigger Railway Rebuild: 2 (CPU-only torch + all latest changes)
-
