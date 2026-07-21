@@ -1,6 +1,10 @@
 [providers]
 python = "3.11"
 
+[variables]
+NIXPACKS_NO_CACHE = "1"
+NO_CACHE = "1"
+
 [phases.setup]
 aptPkgs = ["ffmpeg", "libsndfile1", "libgomp1", "gcc", "g++", "libpq-dev"]
 
