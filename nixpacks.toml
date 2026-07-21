@@ -1,7 +1,7 @@
-[providers]
-python = "3.11"
+providers = ["python"]
 
 [variables]
+NIXPACKS_PYTHON_VERSION = "3.11"
 NIXPACKS_NO_CACHE = "1"
 NO_CACHE = "1"
 
