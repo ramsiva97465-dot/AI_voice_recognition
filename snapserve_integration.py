@@ -28,10 +28,17 @@ import time
 
 
 # =========================================================
-# CONFIGURATION - Update these values after Railway deployment
+# CONFIGURATION - FULLY AUTOMATIC (No code changes needed!)
 # =========================================================
-VOICE_AUTH_API_URL = "https://<YOUR-RAILWAY-URL>/authenticate/pcm"
-BUFFER_SECONDS = 3  # Capture first 3 seconds of caller's voice
+# The manager just sets these Environment Variables in Railway dashboard:
+#   VOICE_AUTH_URL = https://your-app.railway.app
+#
+# The code below picks them up automatically.
+# =========================================================
+import os
+
+VOICE_AUTH_API_URL = os.getenv("VOICE_AUTH_URL", "https://ai-voice-recognition-b0rs.onrender.com") + "/authenticate/pcm"
+BUFFER_SECONDS = int(os.getenv("VOICE_AUTH_BUFFER_SECONDS", "3"))
 
 
 # =========================================================
