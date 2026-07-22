@@ -369,35 +369,20 @@ async def authenticate(
                 "message": "Speaker authenticated successfully."
             }
         else:
-            # NO matching customer exists. Automatically create a new customer.
-            # Generate unique customer name sequentially
-            existing_customers = crud.get_all_customers(db)
-            next_num = len(existing_customers) + 1
-            new_customer_name = f"CUSTOMER_{next_num:06d}"
-            while crud.get_customer_by_name(db, new_customer_name) is not None:
-                next_num += 1
-                new_customer_name = f"CUSTOMER_{next_num:06d}"
-                
-            # Create Customer
-            new_customer = crud.create_customer(db, new_customer_name)
-            
-            # Save Voice Embedding
-            crud.save_embedding(
-                db=db,
-                customer_id=new_customer.customer_id,
-                embedding=embedding,
-                sample_rate=sr,
-                audio_duration=duration_seconds
-            )
-            
+            # Voice similarity was below threshold.
+            # Do NOT create a fake CUSTOMER_XXXXXX profile when enrolled profiles exist,
+            # so low-quality turns never pollute the database or steal identity matches.
             return {
-                "status": "success",
+                "status": "unauthenticated",
                 "existing_customer": False,
-                "new_customer_created": True,
-                "customer_id": str(new_customer.customer_id),
-                "customer_name": new_customer.customer_name,
-                "authentication_result": "NEW_CUSTOMER_CREATED",
-                "message": "New customer created successfully."
+                "customer_id": str(best_customer_id) if best_customer_id else None,
+                "customer_name": best_name if best_name else "Guest",
+                "authentication_result": "UNAUTHENTICATED",
+                "similarity": round(best_sim * 100, 2),
+                "threshold": threshold,
+                "processing_time_ms": round(processing_time_ms, 2),
+                "audio_duration": round(duration_seconds, 2),
+                "message": f"Voice similarity ({round(best_sim * 100, 2)}%) was below threshold ({int(threshold * 100)}%)."
             }
 
     except Exception as exc:
