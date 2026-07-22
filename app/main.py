@@ -519,32 +519,24 @@ async def authenticate_pcm(
                 "message": "Speaker authenticated successfully."
             }
         else:
-            # Auto-create new customer
-            existing_customers = crud.get_all_customers(db)
-            next_num = len(existing_customers) + 1
-            new_customer_name = f"CUSTOMER_{next_num:06d}"
-            while crud.get_customer_by_name(db, new_customer_name) is not None:
-                next_num += 1
-                new_customer_name = f"CUSTOMER_{next_num:06d}"
-
-            new_customer = crud.create_customer(db, new_customer_name)
-            crud.save_embedding(
-                db=db,
-                customer_id=new_customer.customer_id,
-                embedding=embedding,
-                sample_rate=sr,
-                audio_duration=duration_seconds
-            )
-
+            # Voice not recognized — do NOT auto-create fake CUSTOMER_XXXXXX profiles.
+            # Return UNRECOGNIZED so orchestration treats the caller as an unknown guest.
+            print(f"[Voice Auth] No match above threshold {threshold:.2f} — returning UNRECOGNIZED (best similarity: {best_sim:.4f})", flush=True)
             return {
                 "status": "success",
                 "existing_customer": False,
-                "new_customer_created": True,
-                "customer_id": str(new_customer.customer_id),
-                "customer_name": new_customer.customer_name,
-                "authentication_result": "NEW_CUSTOMER_CREATED",
+                "new_customer_created": False,
+                "customer_id": None,
+                "customer_name": None,
+                "authentication_result": "UNRECOGNIZED",
+                "similarity": round(best_sim * 100, 2),
+                "threshold": threshold,
+                "processing_time_ms": round(processing_time_ms, 2),
+                "audio_duration": round(duration_seconds, 2),
+                "model": "ECAPA-TDNN",
                 "audio_format": "PCM_8KHZ",
-                "message": "New customer created successfully."
+                "timestamp": current_timestamp,
+                "message": "Voice not recognized. No match above threshold."
             }
 
     except HTTPException:
